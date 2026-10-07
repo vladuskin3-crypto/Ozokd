@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Магазин</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:var(--tg-theme-bg-color,#fff);--tx:var(--tg-theme-text-color,#111);--hint:var(--tg-theme-hint-color,#888);--btn:var(--tg-theme-button-color,#2481cc);--btx:var(--tg-theme-button-text-color,#fff);--card:var(--tg-theme-secondary-bg-color,#f1f1f4)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,sans-serif;padding:12px 12px 80px}
+.bal{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.bal b{font-size:20px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.hint{color:var(--hint);font-size:14px}h2{margin:4px 0 12px;font-size:18px}
+button{border:0;border-radius:10px;background:var(--btn);color:var(--btx);padding:10px 14px;font:inherit;cursor:pointer}
+button:disabled{opacity:.4}button.ghost{background:transparent;color:var(--btn);padding:6px 0}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--card);padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px))}
+nav button{flex:1;background:transparent;color:var(--hint);font-size:14px}nav button.on{color:var(--btn);font-weight:600}
+</style></head><body>
+<div id="app"><p class="hint">Загрузка…</p></div>
+<nav id="nav"></nav>
+<script>
+const tg=Telegram.WebApp;tg.ready();tg.expand();
+let S=null,tab="shop",cat=null;
+const $=s=>document.querySelector(s);
+function h(t,a={},...k){const e=document.createElement(t);
+  for(const[x,v]of Object.entries(a))x==="class"?e.className=v:x.startsWith("on")?e.addEventListener(x.slice(2),v):e.setAttribute(x,v);
+  k.flat().forEach(c=>e.append(c));return e}
+const fmt=n=>Math.round(n).toLocaleString("ru-RU");
+async function api(p,b={}){
+  const r=await fetch(p,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...b,initData:tg.initData})});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===401)throw new Error("Сессия устарела. Закройте магазин и откройте заново.");
+  if(!r.ok)throw new Error(j.error||"Ошибка");return j}
+const modern=tg.isVersionAtLeast&&tg.isVersionAtLeast("6.2");
+const ask=(m,cb)=>modern?tg.showConfirm(m,cb):cb(confirm(m));
+const say=m=>modern?tg.showAlert(m):alert(m);
+const hap=t=>{try{tg.HapticFeedback.notificationOccurred(t)}catch(e){}};
+let busy=false;
+async function load(){
+  try{S=await api("/api/data");render()}
+  catch(e){$("#app").replaceChildren(h("p",{class:"hint"},"Откройте магазин из Telegram-бота. "+e.message))}}
+function buy(p){
+  if(busy)return;
+  ask(`Купить «${p.name}» за ${fmt(p.price)} ₽?`,async ok=>{
+    if(!ok||busy)return;busy=true;
+    try{const r=await api("/api/buy",{pid:p.id});hap("success");
+      say(`Заказ #${r.order} оплачен! Менеджер скоро передаст товар.`)}
+    catch(e){hap("error");say(e.message)}
+    finally{busy=false;await load()}})}
+function shop(){
+  if(!cat)return[h("h2",{},"Каталог"),...S.categories.map(c=>
+    h("div",{class:"card",onclick:()=>{cat=c.key;render()}},h("div",{class:"row"},h("b",{},c.title),h("span",{class:"hint"},c.products.length+" ›"))))];
+  const c=S.categories.find(x=>x.key===cat);if(!c){cat=null;return shop()}
+  return[h("button",{class:"ghost",onclick:()=>{cat=null;render()}},"‹ Назад"),h("h2",{},c.title),
+    ...(c.products.length?c.products.map(p=>h("div",{class:"card"},
+      h("div",{class:"row"},h("b",{},p.name),h("b",{},fmt(p.price)+" ₽")),
+      h("div",{class:"hint"},p.descr),
+      h("div",{class:"row",style:"margin-top:10px"},h("span",{class:"hint"},p.stock>0?"В наличии: "+p.stock:"Нет в наличии"),
+        h("button",{onclick:()=>buy(p),...(p.stock>0&&S.balance>=p.price?{}:{disabled:""})},p.stock<=0?"Нет в наличии":S.balance<p.price?"Не хватает средств":"Купить"))))
+    :[h("p",{class:"hint"},"Пока здесь нет товаров.")])]}
+function profile(){const u=tg.initDataUnsafe.user||{};
+  return[h("h2",{},"Профиль"),h("div",{class:"card"},
+    h("div",{class:"row"},h("span",{class:"hint"},"ID"),h("b",{},String(u.id||"-"))),
+    h("div",{class:"row"},h("span",{class:"hint"},"Имя"),h("b",{},u.first_name||"-")),
+    h("div",{class:"row"},h("span",{class:"hint"},"Покупок"),h("b",{},String(S.count))),
+    h("div",{class:"row"},h("span",{class:"hint"},"Потрачено"),h("b",{},fmt(S.spent)+" ₽"))),
+    h("button",{onclick:()=>tg.close(),style:"width:100%"},"➕ Пополнить баланс (в боте)")]}
+function orders(){return[h("h2",{},"Мои заказы"),...(S.orders.length?S.orders.map(o=>
+  h("div",{class:"card row"},h("span",{},"#"+o.id+" • "+o.name),h("b",{},fmt(o.price)+" ₽"))):[h("p",{class:"hint"},"Пока пусто.")])]}
+function render(){
+  const view={shop,profile,orders}[tab]();
+  $("#app").replaceChildren(h("div",{class:"bal"},h("span",{class:"hint"},"Баланс"),h("b",{},fmt(S.balance)+" ₽")),...view);
+  $("#nav").replaceChildren(...[["shop","🛒 Каталог"],["profile","👤 Профиль"],["orders","📦 Заказы"]].map(([k,t])=>
+    h("button",{class:tab===k?"on":"",onclick:()=>{tab=k;render()}},t)))}
+load();
+</script></body></html>
